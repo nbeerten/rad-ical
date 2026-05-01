@@ -1,15 +1,19 @@
 {
-  "name": "rad-ical",
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
-  },
-  "dependencies": {
-    "hono": "^4.12.16"
-  },
-  "devDependencies": {
-    "wrangler": "^4.4.0"
-  }
+    "name": "rad-ical",
+    "type": "module",
+    "scripts": {
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy --minify",
+        "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+        "format": "biome format --write",
+        "lint": "biome lint --write"
+    },
+    "dependencies": {
+        "hono": "^4.12.16",
+        "vitest": "^4.1.5"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.4.13",
+        "wrangler": "^4.87.0"
+    }
 }
