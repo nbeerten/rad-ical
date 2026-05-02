@@ -1,6 +1,6 @@
 // test/index.spec.ts
 import { describe, it, expect, beforeEach } from "vitest";
-import app, { transformCalendar } from "../src/index";
+import app, { transformCalendar, parseEventDate, formatDescription } from "../src/index";
 import { convert, revert } from "../src/ical2json";
 import type { JSONCalendar } from "../src/types";
 
@@ -90,7 +90,7 @@ describe("Cancellation Flow (KV Store)", () => {
 		expect(text).toContain("Event Cancelled");
 
 		// Verify the event was added to the student's isolated KV store
-		const cancelled = await env.cancelledevents.get<string[]>("studentA", "json");
+		const cancelled = await env.cancelledevents.get("studentA", "json");
 		expect(cancelled).toEqual(["math101"]);
 	});
 
@@ -122,7 +122,7 @@ describe("Cancellation Flow (KV Store)", () => {
 		expect(text).toContain("Event Restored");
 
 		// Verify the KV state (chem303 should be removed, bio404 remains)
-		const cancelled = await env.cancelledevents.get<string[]>("studentC", "json");
+		const cancelled = await env.cancelledevents.get("studentC", "json");
 		expect(cancelled).toEqual(["bio404"]);
 	});
 });
@@ -186,5 +186,73 @@ describe("transformCalendar", () => {
 		const event = result.VCALENDAR[0].VEVENT[0];
 		expect(event.SUMMARY).toContain("HC Test Course");
 		expect(event.LOCATION).toContain("Spinozagebouw");
+	});
+});
+
+describe("parseEventDate", () => {
+	it("parses valid start and end dates correctly", () => {
+		const event = {
+			"DTSTART;TZID=Europe/Brussels": "20240101T100000",
+			"DTEND;TZID=Europe/Brussels": "20240101T120000",
+		};
+		expect(parseEventDate(event)).toBe("01-01-2024 10:00 - 12:00");
+	});
+
+	it("handles arrays of values", () => {
+		const event = {
+			"DTSTART;TZID=Europe/Brussels": ["20240215T093000"],
+			"DTEND;TZID=Europe/Brussels": ["20240215T113000"],
+		};
+		expect(parseEventDate(event)).toBe("15-02-2024 09:30 - 11:30");
+	});
+
+	it("handles missing end dates", () => {
+		const event = {
+			"DTSTART;TZID=Europe/Brussels": "20240310T140000",
+		};
+		expect(parseEventDate(event)).toBe("10-03-2024 14:00");
+	});
+
+	it("handles dates without time parameters", () => {
+		const event = {
+			"DTSTART;VALUE=DATE": "20240420",
+		};
+		expect(parseEventDate(event)).toBe("20-04-2024");
+	});
+});
+
+describe("formatDescription", () => {
+	it("formats standard description fields with emojis", () => {
+		const raw = "Type: Hoorcollege\\nVakcode: NWI-IBC043\\nLocatie(s):\\nSP 1.23\\nDocent(en): John Doe\\nGroep(en): Group 1";
+		const result = formatDescription(raw);
+
+		expect(result).toContain("🎓 <b>Type:</b> Hoorcollege");
+		expect(result).toContain("🏷️ <b>Vakcode:</b> <code>NWI-IBC043</code>");
+		expect(result).toContain("📍 <b>Locatie(s):</b> SP 1.23");
+		expect(result).toContain("👤 <b>Docent(en):</b> John Doe");
+		expect(result).toContain("👥 <b>Groep(en):</b> Group 1");
+	});
+
+	it("formats links and recordings", () => {
+		const raw = "Studiegids: https://example.com\\nDeze activiteit zal worden opgenomen.";
+		const result = formatDescription(raw);
+
+		expect(result).toContain('📖 <b>Studiegids:</b> <a href="https://example.com">https://example.com</a>');
+		expect(result).toContain("🎥 <i>Deze activiteit zal worden opgenomen.</i>");
+	});
+
+	it("handles inline locations", () => {
+		const raw = "Locatie(s): HG00.304";
+		const result = formatDescription(raw);
+
+		expect(result).toContain("📍 <b>Locatie(s):</b> HG00.304");
+	});
+
+	it("skips empty lines and strips standalone WG numbers", () => {
+		const raw = "\\nWG 12\\nNormal text";
+		const result = formatDescription(raw);
+
+		expect(result).not.toContain("WG 12");
+		expect(result).toContain("Normal text");
 	});
 });

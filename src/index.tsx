@@ -2,8 +2,14 @@ import { Hono } from "hono/tiny";
 import { convert, revert } from "./ical2json";
 import type { JSONCalendar } from "./types";
 import { buildings, colors } from "./constants";
-import { afkortingen, eventTypes } from "./abbreviations";
 import { ConfirmPrompt, ActionResult } from "./views";
+import {
+    baseURL,
+    defaultEventColors,
+    type EventColors,
+    courseAbbreviations,
+    eventTypeAbbreviations,
+} from "./config";
 
 type Bindings = {
     cancelledevents: KVNamespace;
@@ -22,10 +28,6 @@ type Variables = {
 type AppContext = { Bindings: Bindings; Variables: Variables };
 
 const app = new Hono<AppContext>();
-
-const baseURL = new URL("https://persoonlijkrooster.ru.nl/ical");
-
-type EventColors = Record<"WG" | "HC" | "TT" | "WC" | "PR", string>;
 
 app.use("/c/:eventId", async (c, next) => {
     const eventId = c.req.param("eventId");
@@ -123,13 +125,7 @@ app.on("GET", ["/", "/json", "/text", "/ical"], async (c) => {
         return c.text("Missing the 'eu' and/or 'h' query parameters", 400);
     }
 
-    const eventColors = {
-        WG: "darkorange",
-        HC: "red",
-        TT: "purple",
-        WC: "yellow",
-        PR: "yellow",
-    } satisfies EventColors;
+    const eventColors: EventColors = { ...defaultEventColors };
 
     const hccolor = c.req.query("hccolor");
     const wgcolor = c.req.query("wgcolor");
@@ -222,8 +218,9 @@ export function transformCalendar(
             .replace("Type: ", "")
             .trim();
         const eventType =
-            eventTypes[longEventType as keyof typeof eventTypes] ??
-            longEventType;
+            eventTypeAbbreviations[
+                longEventType as keyof typeof eventTypeAbbreviations
+            ] ?? longEventType;
         const courseName = event.SUMMARY.split(" - ")
             .slice(1)
             .join(" - ")
@@ -244,14 +241,20 @@ export function transformCalendar(
         event.SUMMARY = `${eventTypeDisplay} ${courseName} | ${eventLocation}${isRecorded ? " 🔴" : "⭕"}`;
         event.SUMMARY = event.SUMMARY.replaceAll(" (PC-zaal)", "");
 
-        for (const [original, afkorting] of Object.entries(afkortingen)) {
-            event.SUMMARY = event.SUMMARY.replace(original, afkorting);
+        for (const [original, abbreviations] of Object.entries(
+            courseAbbreviations,
+        )) {
+            event.SUMMARY = event.SUMMARY.replace(original, abbreviations);
         }
 
-        if (eventType === eventTypes.Werkgroep) event.COLOR = eventColors.WG;
-        if (eventType === eventTypes.Hoorcollege) event.COLOR = eventColors.HC;
-        if (eventType === eventTypes.Werkcollege) event.COLOR = eventColors.WC;
-        if (eventType === eventTypes.Practicum) event.COLOR = eventColors.WC;
+        if (eventType === eventTypeAbbreviations.Werkgroep)
+            event.COLOR = eventColors.WG;
+        if (eventType === eventTypeAbbreviations.Hoorcollege)
+            event.COLOR = eventColors.HC;
+        if (eventType === eventTypeAbbreviations.Werkcollege)
+            event.COLOR = eventColors.WC;
+        if (eventType === eventTypeAbbreviations.Practicum)
+            event.COLOR = eventColors.WC;
         if (event.SUMMARY.toLowerCase().includes("tentamen"))
             event.COLOR = eventColors.TT;
 
@@ -260,97 +263,12 @@ export function transformCalendar(
             event.LOCATION = `${event.LOCATION}, ${buildings[buildingShortName].join(", ")}`;
         }
 
-        const lines = event.DESCRIPTION.split("\\n");
-        const formattedLines: string[] = [];
-        
-        for (let i = 0; i < lines.length; i++) {
-            const trimmed = lines[i].trim();
-            if (!trimmed) continue;
-
-            if (trimmed.startsWith("Type:")) {
-                formattedLines.push(`🎓 <b>Type:</b> ${trimmed.substring(5).trim()}`);
-            } else if (trimmed.startsWith("Vakcode:")) {
-                formattedLines.push(`🏷️ <b>Vakcode:</b> <code>${trimmed.substring(8).trim()}</code>`);
-            } else if (trimmed === "Locatie(s):" && i + 1 < lines.length) {
-                const nextLine = lines[i + 1].trim();
-                formattedLines.push(`📍 <b>Locatie(s):</b> ${nextLine}`);
-                i++; // Skip the next line since we merged it here
-            } else if (trimmed.startsWith("Locatie(s):")) {
-                formattedLines.push(`📍 <b>Locatie(s):</b> ${trimmed.substring(11).trim()}`);
-            } else if (trimmed.startsWith("Docent(en):")) {
-                formattedLines.push(`👤 <b>Docent(en):</b> ${trimmed.substring(11).trim()}`);
-            } else if (trimmed.startsWith("Groep(en):")) {
-                formattedLines.push(`👥 <b>Groep(en):</b> ${trimmed.substring(10).trim()}`);
-            } else if (trimmed.match(/^WG\s*[0-9]+$/)) {
-                continue;
-            } else if (trimmed.startsWith("Studiegids:")) {
-                const url = trimmed.substring(11).trim();
-                formattedLines.push(`📖 <b>Studiegids:</b> <a href="${url}">${url}</a>`);
-            } else if (trimmed === "Deze activiteit zal worden opgenomen.") {
-                formattedLines.push(`🎥 <i>${trimmed}</i>`);
-            } else if (trimmed.startsWith("Deze afspraak wordt beheerd")) {
-                formattedLines.push(`<hr>⚙️ <i><small>${trimmed}</small></i>`);
-            } else if (trimmed.startsWith("Laatst gesynchroniseerd")) {
-                formattedLines.push(`🔄 <i><small>${trimmed}</small></i>`);
-            } else {
-                formattedLines.push(trimmed);
-            }
-        }
-
-        event.DESCRIPTION = formattedLines.join("<br>");
+        event.DESCRIPTION = formatDescription(event.DESCRIPTION);
 
         const atIndex = event.UID.indexOf("@schedule.ru.nl");
-        let eventId = "";
-        if (atIndex !== -1) {
-            eventId = event.UID.substring(0, atIndex);
-        }
+        const eventId = atIndex !== -1 ? event.UID.substring(0, atIndex) : "";
 
-        let dateStr = "";
-        const dtStartKey = Object.keys(event).find((k) =>
-            k.startsWith("DTSTART"),
-        );
-        const dtEndKey = Object.keys(event).find((k) => k.startsWith("DTEND"));
-
-        if (dtStartKey) {
-            const startVal = Array.isArray(
-                event[dtStartKey as keyof typeof event],
-            )
-                ? (
-                      event[
-                          dtStartKey as keyof typeof event
-                      ] as unknown as string[]
-                  )[0]
-                : event[dtStartKey as keyof typeof event];
-            const endVal = dtEndKey
-                ? Array.isArray(event[dtEndKey as keyof typeof event])
-                    ? (
-                          event[
-                              dtEndKey as keyof typeof event
-                          ] as unknown as string[]
-                      )[0]
-                    : event[dtEndKey as keyof typeof event]
-                : "";
-
-            if (typeof startVal === "string" && startVal.length >= 8) {
-                const year = startVal.substring(0, 4);
-                const month = startVal.substring(4, 6);
-                const day = startVal.substring(6, 8);
-                dateStr = `${day}-${month}-${year}`;
-
-                const startTime = startVal.match(/T(\d{2})(\d{2})/);
-                if (startTime) {
-                    dateStr += ` ${startTime[1]}:${startTime[2]}`;
-
-                    const endTime =
-                        typeof endVal === "string"
-                            ? endVal.match(/T(\d{2})(\d{2})/)
-                            : null;
-                    if (endTime) {
-                        dateStr += ` - ${endTime[1]}:${endTime[2]}`;
-                    }
-                }
-            }
-        }
+        const dateStr = parseEventDate(event);
 
         const encodedTitle = encodeURIComponent(event.SUMMARY);
         const encodedDate = encodeURIComponent(dateStr);
@@ -369,6 +287,97 @@ export function transformCalendar(
     }
 
     return clone;
+}
+
+export function parseEventDate(event: Record<string, unknown>): string {
+    let dateStr = "";
+    const dtStartKey = Object.keys(event).find((k) => k.startsWith("DTSTART"));
+    const dtEndKey = Object.keys(event).find((k) => k.startsWith("DTEND"));
+
+    if (dtStartKey) {
+        const startVal = Array.isArray(event[dtStartKey])
+            ? event[dtStartKey][0]
+            : event[dtStartKey];
+        const endVal = dtEndKey
+            ? Array.isArray(event[dtEndKey])
+                ? event[dtEndKey][0]
+                : event[dtEndKey]
+            : "";
+
+        if (typeof startVal === "string" && startVal.length >= 8) {
+            const year = startVal.substring(0, 4);
+            const month = startVal.substring(4, 6);
+            const day = startVal.substring(6, 8);
+            dateStr = `${day}-${month}-${year}`;
+
+            const startTime = startVal.match(/T(\d{2})(\d{2})/);
+            if (startTime) {
+                dateStr += ` ${startTime[1]}:${startTime[2]}`;
+
+                const endTime =
+                    typeof endVal === "string"
+                        ? endVal.match(/T(\d{2})(\d{2})/)
+                        : null;
+                if (endTime) {
+                    dateStr += ` - ${endTime[1]}:${endTime[2]}`;
+                }
+            }
+        }
+    }
+    return dateStr;
+}
+
+export function formatDescription(description: string): string {
+    const lines = description.split("\\n");
+    const formattedLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) continue;
+
+        if (trimmed.startsWith("Type:")) {
+            formattedLines.push(
+                `🎓 <b>Type:</b> ${trimmed.substring(5).trim()}`,
+            );
+        } else if (trimmed.startsWith("Vakcode:")) {
+            formattedLines.push(
+                `🏷️ <b>Vakcode:</b> <code>${trimmed.substring(8).trim()}</code>`,
+            );
+        } else if (trimmed === "Locatie(s):" && i + 1 < lines.length) {
+            const nextLine = lines[i + 1].trim();
+            formattedLines.push(`📍 <b>Locatie(s):</b> ${nextLine}`);
+            i++; // Skip the next line since we merged it here
+        } else if (trimmed.startsWith("Locatie(s):")) {
+            formattedLines.push(
+                `📍 <b>Locatie(s):</b> ${trimmed.substring(11).trim()}`,
+            );
+        } else if (trimmed.startsWith("Docent(en):")) {
+            formattedLines.push(
+                `👤 <b>Docent(en):</b> ${trimmed.substring(11).trim()}`,
+            );
+        } else if (trimmed.startsWith("Groep(en):")) {
+            formattedLines.push(
+                `👥 <b>Groep(en):</b> ${trimmed.substring(10).trim()}`,
+            );
+        } else if (trimmed.match(/^WG\s*[0-9]+$/)) {
+            // Intentionally skip standalone working group numbers
+        } else if (trimmed.startsWith("Studiegids:")) {
+            const url = trimmed.substring(11).trim();
+            formattedLines.push(
+                `📖 <b>Studiegids:</b> <a href="${url}">${url}</a>`,
+            );
+        } else if (trimmed === "Deze activiteit zal worden opgenomen.") {
+            formattedLines.push(`🎥 <i>${trimmed}</i>`);
+        } else if (trimmed.startsWith("Deze afspraak wordt beheerd")) {
+            formattedLines.push(`<hr>⚙️ <i><small>${trimmed}</small></i>`);
+        } else if (trimmed.startsWith("Laatst gesynchroniseerd")) {
+            formattedLines.push(`🔄 <i><small>${trimmed}</small></i>`);
+        } else {
+            formattedLines.push(trimmed);
+        }
+    }
+
+    return formattedLines.join("<br>");
 }
 
 export default app;
