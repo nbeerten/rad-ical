@@ -261,36 +261,41 @@ export function transformCalendar(
         }
 
         const lines = event.DESCRIPTION.split("\\n");
-        const formattedLines = lines
-            .map((line) => {
-                const trimmed = line.trim();
-                if (!trimmed) return "";
+        const formattedLines: string[] = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (!trimmed) continue;
 
-                if (trimmed.startsWith("Type:"))
-                    return `🎓 <b>Type:</b> ${trimmed.substring(5).trim()}`;
-                if (trimmed.startsWith("Vakcode:"))
-                    return `🏷️ <b>Vakcode:</b> <code>${trimmed.substring(8).trim()}</code>`;
-                if (trimmed.startsWith("Locatie(s):"))
-                    return `📍 <b>Locatie(s):</b>`;
-                if (trimmed.startsWith("Docent(en):"))
-                    return `👤 <b>Docent(en):</b> ${trimmed.substring(11).trim()}`;
-                if (trimmed.startsWith("Groep(en):"))
-                    return `👥 <b>Groep(en):</b> ${trimmed.substring(10).trim()}`;
-                if (trimmed.match(/^WG\s*[0-9]+$/)) return "";
-                if (trimmed.startsWith("Studiegids:")) {
-                    const url = trimmed.substring(11).trim();
-                    return `📖 <b>Studiegids:</b> <a href="${url}">${url}</a>`;
-                }
-                if (trimmed === "Deze activiteit zal worden opgenomen.")
-                    return `🎥 <i>${trimmed}</i>`;
-                if (trimmed.startsWith("Deze afspraak wordt beheerd"))
-                    return `<hr>⚙️ <i><small>${trimmed}</small></i>`;
-                if (trimmed.startsWith("Laatst gesynchroniseerd"))
-                    return `🔄 <i><small>${trimmed}</small></i>`;
-
-                return trimmed;
-            })
-            .filter((line) => line !== "");
+            if (trimmed.startsWith("Type:")) {
+                formattedLines.push(`🎓 <b>Type:</b> ${trimmed.substring(5).trim()}`);
+            } else if (trimmed.startsWith("Vakcode:")) {
+                formattedLines.push(`🏷️ <b>Vakcode:</b> <code>${trimmed.substring(8).trim()}</code>`);
+            } else if (trimmed === "Locatie(s):" && i + 1 < lines.length) {
+                const nextLine = lines[i + 1].trim();
+                formattedLines.push(`📍 <b>Locatie(s):</b> ${nextLine}`);
+                i++; // Skip the next line since we merged it here
+            } else if (trimmed.startsWith("Locatie(s):")) {
+                formattedLines.push(`📍 <b>Locatie(s):</b> ${trimmed.substring(11).trim()}`);
+            } else if (trimmed.startsWith("Docent(en):")) {
+                formattedLines.push(`👤 <b>Docent(en):</b> ${trimmed.substring(11).trim()}`);
+            } else if (trimmed.startsWith("Groep(en):")) {
+                formattedLines.push(`👥 <b>Groep(en):</b> ${trimmed.substring(10).trim()}`);
+            } else if (trimmed.match(/^WG\s*[0-9]+$/)) {
+                continue;
+            } else if (trimmed.startsWith("Studiegids:")) {
+                const url = trimmed.substring(11).trim();
+                formattedLines.push(`📖 <b>Studiegids:</b> <a href="${url}">${url}</a>`);
+            } else if (trimmed === "Deze activiteit zal worden opgenomen.") {
+                formattedLines.push(`🎥 <i>${trimmed}</i>`);
+            } else if (trimmed.startsWith("Deze afspraak wordt beheerd")) {
+                formattedLines.push(`<hr>⚙️ <i><small>${trimmed}</small></i>`);
+            } else if (trimmed.startsWith("Laatst gesynchroniseerd")) {
+                formattedLines.push(`🔄 <i><small>${trimmed}</small></i>`);
+            } else {
+                formattedLines.push(trimmed);
+            }
+        }
 
         event.DESCRIPTION = formattedLines.join("<br>");
 
