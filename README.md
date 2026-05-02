@@ -8,6 +8,9 @@ A Cloudflare Worker built with Hono to proxy and transform personal Radboud Univ
 
 ### How to use the hosted version
 
+> [!warning] 
+> Shorthands for event types currently only work if you use `persoonlijkrooster.ru.nl` in Dutch. If you want to add these translations, please create a pull request or an issue.
+
 If you don't want to deploy it yourself, you can use the hosted instance at `rad-ical.nilsbeerten.nl`. 
 
 1. Go to the [RU Persoonlijk Rooster](https://persoonlijkrooster.ru.nl/) (Personal Schedule) website and log in.
