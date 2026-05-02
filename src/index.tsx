@@ -1,5 +1,4 @@
 import { Hono } from "hono/tiny";
-import type { Context } from "hono";
 import { convert, revert } from "./ical2json";
 import type { JSONCalendar } from "./types";
 import { buildings, colors } from "./constants";
@@ -15,6 +14,7 @@ type Variables = {
     user: string;
     rawTitle: string | undefined;
     titleText: string;
+    dateText: string;
     cancelled: string[];
     isCancelled: boolean;
 };
@@ -31,12 +31,14 @@ app.use("/c/:eventId", async (c, next) => {
     const eventId = c.req.param("eventId");
     const user = c.req.query("u");
     const rawTitle = c.req.query("title");
+    const rawDate = c.req.query("date");
 
     if (!eventId || !user) {
         return c.text("Missing the 'id' or 'u' parameters", 400);
     }
 
     const titleText = rawTitle ? rawTitle.replace(/\\/g, "") : "this event";
+    const dateText = rawDate ? rawDate : "";
 
     const cancelled =
         (await c.env.cancelledevents.get<string[]>(user, "json")) || [];
@@ -46,6 +48,7 @@ app.use("/c/:eventId", async (c, next) => {
     c.set("user", user);
     c.set("rawTitle", rawTitle);
     c.set("titleText", titleText);
+    c.set("dateText", dateText);
     c.set("cancelled", cancelled);
     c.set("isCancelled", isCancelled);
 
@@ -53,23 +56,31 @@ app.use("/c/:eventId", async (c, next) => {
 });
 
 app.get("/c/:eventId", async (c) => {
-    const { isCancelled, rawTitle, titleText } = c.var;
+    const { isCancelled, rawTitle, titleText, dateText } = c.var;
 
     return c.html(
         <ConfirmPrompt
             isCancelled={isCancelled}
             rawTitle={rawTitle}
             titleText={titleText}
+            dateText={dateText}
         />,
     );
 });
 
 app.post("/c/:eventId", async (c) => {
-    const { eventId, user, cancelled, isCancelled, rawTitle, titleText } =
-        c.var;
+    const {
+        eventId,
+        user,
+        cancelled,
+        isCancelled,
+        rawTitle,
+        titleText,
+        dateText,
+    } = c.var;
 
     const formData = await c.req.parseBody();
-    const action = formData["action"] || (isCancelled ? "restore" : "cancel");
+    const action = formData.action || (isCancelled ? "restore" : "cancel");
 
     let actionTaken = "";
 
@@ -90,6 +101,7 @@ app.post("/c/:eventId", async (c) => {
             actionTaken={actionTaken}
             rawTitle={rawTitle}
             titleText={titleText}
+            dateText={dateText}
         />,
     );
 });
@@ -157,7 +169,7 @@ app.on("GET", ["/", "/json", "/text", "/ical"], async (c) => {
 
     const requestOrigin = new URL(c.req.url).origin;
 
-    const transformedCal = await transformCalendar(
+    const transformedCal = transformCalendar(
         jsonCal,
         eventColors,
         cancelledIds,
@@ -184,7 +196,7 @@ app.on("GET", ["/", "/json", "/text", "/ical"], async (c) => {
     return new Response(null, { status: 500 });
 });
 
-export async function transformCalendar(
+export function transformCalendar(
     calendar: JSONCalendar,
     eventColors: EventColors,
     keyList: string[],
@@ -221,7 +233,15 @@ export async function transformCalendar(
             "Deze activiteit zal worden opgenomen.",
         );
 
-        event.SUMMARY = `${eventType} ${courseName} | ${eventLocation}${isRecorded ? " 🔴" : "⭕"}`;
+        const wgMatch = event.DESCRIPTION.match(
+            /(?:^|\\n)WG\s*([0-9]+)(?:\\n|$)/,
+        );
+        const wgNumber = wgMatch ? wgMatch[1] : null;
+        const eventTypeDisplay = wgNumber
+            ? `${eventType}(${wgNumber})`
+            : eventType;
+
+        event.SUMMARY = `${eventTypeDisplay} ${courseName} | ${eventLocation}${isRecorded ? " 🔴" : "⭕"}`;
         event.SUMMARY = event.SUMMARY.replaceAll(" (PC-zaal)", "");
 
         for (const [original, afkorting] of Object.entries(afkortingen)) {
@@ -240,13 +260,100 @@ export async function transformCalendar(
             event.LOCATION = `${event.LOCATION}, ${buildings[buildingShortName].join(", ")}`;
         }
 
+        const lines = event.DESCRIPTION.split("\\n");
+        const formattedLines = lines
+            .map((line) => {
+                const trimmed = line.trim();
+                if (!trimmed) return "";
+
+                if (trimmed.startsWith("Type:"))
+                    return `🎓 <b>Type:</b> ${trimmed.substring(5).trim()}`;
+                if (trimmed.startsWith("Vakcode:"))
+                    return `🏷️ <b>Vakcode:</b> <code>${trimmed.substring(8).trim()}</code>`;
+                if (trimmed.startsWith("Locatie(s):"))
+                    return `📍 <b>Locatie(s):</b>`;
+                if (trimmed.startsWith("Docent(en):"))
+                    return `👤 <b>Docent(en):</b> ${trimmed.substring(11).trim()}`;
+                if (trimmed.startsWith("Groep(en):"))
+                    return `👥 <b>Groep(en):</b> ${trimmed.substring(10).trim()}`;
+                if (trimmed.match(/^WG\s*[0-9]+$/)) return "";
+                if (trimmed.startsWith("Studiegids:")) {
+                    const url = trimmed.substring(11).trim();
+                    return `📖 <b>Studiegids:</b> <a href="${url}">${url}</a>`;
+                }
+                if (trimmed === "Deze activiteit zal worden opgenomen.")
+                    return `🎥 <i>${trimmed}</i>`;
+                if (trimmed.startsWith("Deze afspraak wordt beheerd"))
+                    return `<hr>⚙️ <i><small>${trimmed}</small></i>`;
+                if (trimmed.startsWith("Laatst gesynchroniseerd"))
+                    return `🔄 <i><small>${trimmed}</small></i>`;
+
+                return trimmed;
+            })
+            .filter((line) => line !== "");
+
+        event.DESCRIPTION = formattedLines.join("<br>");
+
         const atIndex = event.UID.indexOf("@schedule.ru.nl");
         let eventId = "";
         if (atIndex !== -1) {
             eventId = event.UID.substring(0, atIndex);
         }
+
+        let dateStr = "";
+        const dtStartKey = Object.keys(event).find((k) =>
+            k.startsWith("DTSTART"),
+        );
+        const dtEndKey = Object.keys(event).find((k) => k.startsWith("DTEND"));
+
+        if (dtStartKey) {
+            const startVal = Array.isArray(
+                event[dtStartKey as keyof typeof event],
+            )
+                ? (
+                      event[
+                          dtStartKey as keyof typeof event
+                      ] as unknown as string[]
+                  )[0]
+                : event[dtStartKey as keyof typeof event];
+            const endVal = dtEndKey
+                ? Array.isArray(event[dtEndKey as keyof typeof event])
+                    ? (
+                          event[
+                              dtEndKey as keyof typeof event
+                          ] as unknown as string[]
+                      )[0]
+                    : event[dtEndKey as keyof typeof event]
+                : "";
+
+            if (typeof startVal === "string" && startVal.length >= 8) {
+                const year = startVal.substring(0, 4);
+                const month = startVal.substring(4, 6);
+                const day = startVal.substring(6, 8);
+                dateStr = `${day}-${month}-${year}`;
+
+                const startTime = startVal.match(/T(\d{2})(\d{2})/);
+                if (startTime) {
+                    dateStr += ` ${startTime[1]}:${startTime[2]}`;
+
+                    const endTime =
+                        typeof endVal === "string"
+                            ? endVal.match(/T(\d{2})(\d{2})/)
+                            : null;
+                    if (endTime) {
+                        dateStr += ` - ${endTime[1]}:${endTime[2]}`;
+                    }
+                }
+            }
+        }
+
         const encodedTitle = encodeURIComponent(event.SUMMARY);
-        event.DESCRIPTION += `<br><a href="${requestOrigin}/c/${eventId}?u=${userToken}&title=${encodedTitle}">Cancel</a>`;
+        const encodedDate = encodeURIComponent(dateStr);
+
+        const cancelUrl = `${requestOrigin}/c/${eventId}?u=${userToken}&title=${encodedTitle}&date=${encodedDate}`;
+        const buttonStyle =
+            "display: inline-block; padding: 6px 12px; background-color: #dc2626; color: white; text-decoration: none; font-weight: bold; border-radius: 4px;";
+        event.DESCRIPTION += `<br><br><a href="${cancelUrl}" style="${buttonStyle}">❌ Cancel this event</a>`;
 
         const isCancelled = keyList.includes(eventId);
 

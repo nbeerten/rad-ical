@@ -11,6 +11,7 @@ export const Layout: FC<PropsWithChildren<{ title: string }>> = ({
                 name="viewport"
                 content="width=device-width, initial-scale=1.0"
             />
+            <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
             <link rel="preconnect" href="https://rsms.me/" />
             <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
             <link rel="stylesheet" href="/styles.css" />
@@ -24,14 +25,24 @@ export const ConfirmPrompt: FC<{
     isCancelled: boolean;
     rawTitle?: string;
     titleText: string;
-}> = ({ isCancelled, rawTitle, titleText }) => (
+    dateText?: string;
+}> = ({ isCancelled, rawTitle, titleText, dateText }) => (
     <Layout title={`${isCancelled ? "Restore" : "Cancel"} Event`}>
-        <div class="card">
-            <h1 class="text-dark">
+        <div class="prompt-card">
+            <h1 class="prompt-title">
                 {isCancelled ? "Restore" : "Cancel"} Event
             </h1>
-            {rawTitle && <div class="subtitle">{titleText}</div>}
-            <p class="mb-6">
+            {rawTitle && (
+                <div class="event-subtitle">
+                    <div style="font-weight: 500;">{titleText}</div>
+                    {dateText && (
+                        <div style="margin-top: 0.25rem; font-size: 0.9em; opacity: 0.8;">
+                            🗓️ {dateText}
+                        </div>
+                    )}
+                </div>
+            )}
+            <p class="event-description">
                 {isCancelled
                     ? "This event is currently removed from your calendar. Do you want to restore it?"
                     : "Are you sure you want to remove this event from your calendar?"}
@@ -44,7 +55,7 @@ export const ConfirmPrompt: FC<{
                 />
                 <button
                     type="submit"
-                    class={`btn ${isCancelled ? "btn-restore" : ""}`}
+                    class={`action-button ${isCancelled ? "is-restore" : ""}`}
                 >
                     {isCancelled ? "Confirm Restore" : "Confirm Cancellation"}
                 </button>
@@ -57,19 +68,33 @@ export const ActionResult: FC<{
     actionTaken: string;
     rawTitle?: string;
     titleText: string;
-}> = ({ actionTaken, rawTitle, titleText }) => {
+    dateText?: string;
+}> = ({ actionTaken, rawTitle, titleText, dateText }) => {
     const isCancelled = actionTaken === "cancelled";
     return (
         <Layout title={`Event ${isCancelled ? "Cancelled" : "Restored"}`}>
-            <div class="card">
-                <div class="header">
+            <div class="prompt-card">
+                <div class="prompt-header">
                     <div>
-                        <h1 class={isCancelled ? "text-green" : "text-blue"}>
+                        <h1
+                            class={`prompt-title ${isCancelled ? "is-success" : "is-info"}`}
+                        >
                             Event {isCancelled ? "Cancelled" : "Restored"}
                         </h1>
-                        {rawTitle && <div class="subtitle">{titleText}</div>}
+                        {rawTitle && (
+                            <div class="event-subtitle">
+                                <div style="font-weight: 500;">{titleText}</div>
+                                {dateText && (
+                                    <div style="margin-top: 0.25rem; font-size: 0.9em; opacity: 0.8;">
+                                        🗓️ {dateText}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    <div class={`icon ${isCancelled ? "text-green" : "text-blue"}`}>
+                    <div
+                        class={`status-icon ${isCancelled ? "is-success" : "is-info"}`}
+                    >
                         {isCancelled ? (
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -78,6 +103,7 @@ export const ActionResult: FC<{
                                 strokeWidth={3}
                                 stroke="currentColor"
                             >
+                                <title>Checkmark icon</title>
                                 <path
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
@@ -92,6 +118,7 @@ export const ActionResult: FC<{
                                 strokeWidth={3}
                                 stroke="currentColor"
                             >
+                                <title>Undo icon</title>
                                 <path
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
@@ -101,21 +128,20 @@ export const ActionResult: FC<{
                         )}
                     </div>
                 </div>
-                
-                
-                <p class="mb-0">
+
+                <p class="result-description">
                     The event has been successfully{" "}
                     {isCancelled ? "removed" : "restored"}. It will{" "}
                     {isCancelled ? "disappear from" : "reappear in"} your
                     calendar after the next synchronisation.
                 </p>
-                <form method="post" class="mt-6">
+                <form method="post" class="undo-form">
                     <input
                         type="hidden"
                         name="action"
                         value={isCancelled ? "restore" : "cancel"}
                     />
-                    <button type="submit" class="btn btn-undo">
+                    <button type="submit" class="action-button is-undo">
                         Undo {isCancelled ? "Cancellation" : "Restore"}
                     </button>
                 </form>
